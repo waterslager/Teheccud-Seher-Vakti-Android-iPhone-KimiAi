@@ -1,0 +1,25 @@
+{
+  "name": "Teheccüd · Seher · Sabah Namazı Vakitleri",
+  "short_name": "Teheccüd",
+  "description": "Diyanet İşleri Başkanlığı verilerine dayalı Teheccüd, Seher ve Sabah Namazı vakitleri.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1a2240",
+  "theme_color": "#0b1020",
+  "orientation": "portrait-primary",
+  "lang": "tr",
+  "icons": [
+    {
+      "src": "icons/1_192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/2_512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
