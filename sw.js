@@ -1,5 +1,5 @@
 const CACHE = "teheccud-v1";
-const ASSETS = ["./", "./index.html", "./icons/1_192.png", "./icons/2_512.png"];
+const ASSETS = ["./", "./index.html", "./1_192.png", "./2_512.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
