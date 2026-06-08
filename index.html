@@ -446,11 +446,9 @@ function findActivePeriod(timesList) {
 
   const todayData = timesList[todayIdx];
   const todayImsak = parseTime(todayData.imsak, todayData.date);
-  const todayGunes = parseTime(todayData.gunes, todayData.date);
-  const todaySabah = new Date(todayGunes.getTime() - getSabahOffset() * 60 * 1000);
   const now = new Date();
 
-  if (now < todaySabah && todayIdx > 0) {
+  if (now < todayImsak && todayIdx > 0) {
     return { aksamDay: timesList[todayIdx - 1], imsakDay: todayData };
   }
   const next = timesList[todayIdx + 1];
