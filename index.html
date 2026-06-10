@@ -299,8 +299,6 @@ async function fetchJSON(url) {
 }
 
 async function getIller() {
-  const cached = cacheGet("iller");
-  if (cached) return cached;
   const data = await fetchJSON(`${DIYANET_BASE}/locations/states?countryId=2`);
   data.sort((a, b) => (a.name || "").localeCompare(b.name || "", "tr"));
   const normalized = data.map(s => ({ SehirID: s._id, SehirAdi: s.name }));
@@ -309,13 +307,10 @@ async function getIller() {
 }
 
 async function getIlceler(ilId) {
-  const cached = cacheGet("ilceler." + ilId);
-  if (cached) return cached;
+  // İlçe listesi her zaman API'den taze çekilir (cache kullanılmaz)
   const data = await fetchJSON(`${DIYANET_BASE}/locations/districts?stateId=${ilId}`);
   data.sort((a, b) => (a.name || "").localeCompare(b.name || "", "tr"));
-  const normalized = data.map(i => ({ IlceID: i._id, IlceAdi: i.name }));
-  cacheSet("ilceler." + ilId, normalized);
-  return normalized;
+  return data.map(i => ({ IlceID: i._id, IlceAdi: i.name }));
 }
 
 async function getVakitlerDiyanet(ilceId) {
