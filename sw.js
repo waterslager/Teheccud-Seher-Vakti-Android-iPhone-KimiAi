@@ -1,4 +1,4 @@
-const CACHE = "teheccud-v1";
+const CACHE = "teheccud-v2";
 const ASSETS = ["./", "./index.html", "./1_192.png", "./2_512.png"];
 
 self.addEventListener("install", e => {
@@ -16,6 +16,6 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET") return;
   e.respondWith(
-    fetch(e.request).catch(() => caches.match(e.request))
+    fetch(e.request, { cache: "no-store" }).catch(() => caches.match(e.request))
   );
 });
