@@ -1,0 +1,22 @@
+{
+  "name": "Kıyâmü'l-Leyl",
+  "short_name": "Kıyâmü'l-Leyl",
+  "description": "Teheccüd, Seher ve Sabah Namazı vakitleri - Diyanet İşleri Başkanlığı verileri",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#13294f",
+  "theme_color": "#13294f",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
