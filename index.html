@@ -402,270 +402,399 @@
     </div>
 
     <script>
-        const API_BASE = 'https://ezanvakti.imsakiyem.com/api';
-        const TURKEY_ID = '2';
-        const stateSelect = document.getElementById('stateSelect');
-        const loadingDiv = document.getElementById('loadingDiv');
-        const errorDiv = document.getElementById('errorDiv');
-        const resultsDiv = document.getElementById('resultsDiv');
-        const dkInput = document.getElementById('dkInput');
+"use strict";
 
-        let states = [];
-        let currentStateId = null;
-        let refreshTimer = null;
-        let tomorrowGunesMins = null;
+const STORAGE_KEY = "kiyamul-leyl.location.v1";
 
-        // Load Turkish states on page load
-        async function loadStates() {
-            try {
-                const res = await fetch(`${API_BASE}/locations/states?countryId=${TURKEY_ID}`);
-                const data = await res.json();
-                states = data.data || [];
-                states.sort((a,b) => a.name.localeCompare(b.name, 'tr'));
-                stateSelect.innerHTML = '<option value="">Şehir seçin...</option>' +
-                    states.map(s => `<option value="${s._id}">${s.name}</option>`).join('');
-            } catch(e) {
-                showError('Şehirler yüklenemedi. Lütfen sayfayı yenileyin.');
-            }
-        }
+const stateSelect = document.getElementById("stateSelect");
+const loadingDiv = document.getElementById("loadingDiv");
+const errorDiv = document.getElementById("errorDiv");
+const resultsDiv = document.getElementById("resultsDiv");
+const dkInput = document.getElementById("dkInput");
+const statusEl = document.getElementById("status") || document.createElement("div");
 
-        stateSelect.addEventListener('change', () => {
-            if(stateSelect.value) {
-                calculateTimes();
-            }
-        });
+let state = {
+  location: null,
+  times: null,
+  countdownTimer: null,
+  loadInFlight: false
+};
 
-        dkInput.addEventListener('change', updateSabahTime);
-        dkInput.addEventListener('input', updateSabahTime);
+let states = [];
+let cachedRangeList = [];
+let lastRenderedTomorrowDate = null;
+let tomorrowGunesMins = null;
 
-        function timeToMinutes(t) {
-            const [h, m] = t.split(':').map(Number);
-            return h * 60 + m;
-        }
+function setStatus(msg, isError) {
+  if (statusEl.id) {
+    statusEl.textContent = msg || "";
+    statusEl.classList.toggle("error", !!isError);
+    statusEl.classList.toggle("hidden", !msg);
+  }
+}
 
-        function minutesToTime(mins) {
-            let h = Math.floor(mins / 60) % 24;
-            let m = Math.floor(mins % 60);
-            return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-        }
+function showError(msg) {
+  errorDiv.textContent = msg;
+  errorDiv.classList.remove("hidden");
+  loadingDiv.classList.add("hidden");
+}
 
-        function showError(msg) {
-            errorDiv.textContent = msg;
-            errorDiv.classList.remove('hidden');
-            loadingDiv.classList.add('hidden');
-        }
+function hideError() {
+  errorDiv.classList.add("hidden");
+}
 
-        function hideError() {
-            errorDiv.classList.add('hidden');
-        }
+function pad(n) { return n < 10 ? "0" + n : "" + n; }
 
-        // Gerçek takvim gününe göre (bugünden ofsetli) tarih string'i üretir
-        function getDateStrOffset(offsetDays) {
-            const d = new Date();
-            d.setDate(d.getDate() + offsetDays);
-            return d.toISOString().split('T')[0];
-        }
+function loadSaved() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return null;
+}
 
-        // 'YYYY-MM-DD' formatındaki bir tarihi Türkçe uzun tarih + gün adına çevirir
-        function formatTrDateStr(dateStr) {
-            const [y, m, d] = dateStr.split('-').map(Number);
-            const dateObj = new Date(y, m - 1, d);
-            const datePart = dateObj.toLocaleDateString('tr-TR', {
-                year: 'numeric', month: 'long', day: 'numeric'
-            });
-            const weekday = dateObj.toLocaleDateString('tr-TR', { weekday: 'long' });
-            return datePart + ', ' + weekday;
-        }
+function saveLocation(loc) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(loc)); } catch (e) {}
+}
 
-        function updateSabahTime() {
-            if (tomorrowGunesMins === null) return;
-            const dk = parseInt(dkInput.value) || 60;
-            const sabahMins = tomorrowGunesMins - dk;
-            document.getElementById('sabahTime').textContent = minutesToTime(sabahMins);
-        }
+const API_BASE = "https://ezanvakti.imsakiyem.com/api";
+const TURKEY_ID = "2";
 
-        // Schedule next auto-refresh at tomorrow's gunes time
-        function scheduleAutoRefresh(gunesTime) {
-            if(refreshTimer) clearTimeout(refreshTimer);
+async function fetchJSON(url) {
+  const res = await fetch(url, { cache: "no-store", mode: "cors", credentials: "omit" });
+  if (!res.ok) throw new Error("API hatası: " + res.status);
+  const json = await res.json();
+  if (json && typeof json === "object" && "data" in json) {
+    if (json.success === false) throw new Error(json.message || "API başarısız");
+    return json.data;
+  }
+  return json;
+}
 
-            const now = new Date();
-            const [gh, gm] = gunesTime.split(':').map(Number);
-            let refreshTime = new Date(now.getFullYear(), now.getMonth(), now.getDate(), gh, gm, 0);
+async function getIller() {
+  const data = await fetchJSON(`${API_BASE}/locations/states?countryId=${TURKEY_ID}`);
+  data.sort((a, b) => (a.name || "").localeCompare(b.name || "", "tr"));
+  return data.map(s => ({ SehirID: s._id, SehirAdi: s.name }));
+}
 
-            // If gunes has already passed today, schedule for tomorrow
-            if(refreshTime <= now) {
-                refreshTime.setDate(refreshTime.getDate() + 1);
-            }
+async function getIlAdindakiIlce(ilId, ilAd) {
+  const data = await fetchJSON(`${API_BASE}/locations/districts?stateId=${ilId}`);
+  if (!data || data.length === 0) return null;
+  const aranan = (ilAd || "").toLocaleUpperCase("tr").trim();
+  const eslesen = data.find(i => (i.name || "").toLocaleUpperCase("tr").trim() === aranan)
+               || data[0];
+  return { IlceID: eslesen._id, IlceAdi: eslesen.name };
+}
 
-            const delay = refreshTime - now;
+function getIstanbulParts() {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Europe/Istanbul",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false
+  });
+  const parts = fmt.formatToParts(new Date());
+  const get = (t) => parts.find(p => p.type === t).value;
+  return {
+    year: parseInt(get("year"), 10),
+    month: parseInt(get("month"), 10),
+    day: parseInt(get("day"), 10),
+    hour: parseInt(get("hour"), 10) % 24,
+    minute: parseInt(get("minute"), 10)
+  };
+}
 
-            refreshTimer = setTimeout(() => {
-                if(currentStateId) {
-                    calculateTimes();
-                }
-            }, delay);
-        }
+function isoDate(d) {
+  return d.getUTCFullYear() + "-" + pad(d.getUTCMonth() + 1) + "-" + pad(d.getUTCDate());
+}
 
-        async function calculateTimes() {
-            hideError();
-            loadingDiv.classList.remove('hidden');
-            resultsDiv.classList.add('hidden');
+async function getVakitlerDiyanet(ilceId) {
+  const p = getIstanbulParts();
+  const today = new Date(Date.UTC(p.year, p.month - 1, p.day, 12, 0, 0));
+  const start = new Date(today); start.setUTCDate(start.getUTCDate() - 1);
+  const end = new Date(today); end.setUTCDate(end.getUTCDate() + 3);
+  const url = `${API_BASE}/prayer-times/${ilceId}/range?startDate=${isoDate(start)}&endDate=${isoDate(end)}`;
+  const data = await fetchJSON(url);
+  return data.map(d => {
+    const t = (d.times && typeof d.times === "object") ? d.times : d;
+    const pick = (a, b) => {
+      const v = t[a] || t[b] || d[a] || d[b] || "";
+      return typeof v === "string" && v.includes(":") ? v.substring(0, 5) : "--:--";
+    };
+    let dateObj;
+    const raw = d.date || d.MiladiTarihKisaIso8601 || d.MiladiTarihUzunIso8601 || "";
+    if (/^\d{2}\.\d{2}\.\d{4}$/.test(raw)) {
+      const [dd, mm, yyyy] = raw.split(".").map(Number);
+      dateObj = new Date(yyyy, mm - 1, dd);
+    } else if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+      const [yyyy, mm, dd] = raw.substring(0, 10).split("-").map(Number);
+      dateObj = new Date(yyyy, mm - 1, dd);
+    } else {
+      dateObj = new Date();
+    }
+    return {
+      date:   new Date(dateObj.getFullYear(), dateObj.getMonth(), dateObj.getDate()),
+      imsak:  pick("imsak",  "Imsak"),
+      gunes:  pick("gunes",  "Gunes"),
+      ogle:   pick("ogle",   "Ogle"),
+      ikindi: pick("ikindi", "Ikindi"),
+      aksam:  pick("aksam",  "Aksam"),
+      yatsi:  pick("yatsi",  "Yatsi"),
+      hijri:  d.HicriTarihUzun || (d.hijri_date && d.hijri_date.full_date) || d.hijriDate || ""
+    };
+  });
+}
 
-            const stateId = stateSelect.value;
-            currentStateId = stateId;
-            const yesterdayStr = getDateStrOffset(-1);
-            const realTodayStr = getDateStrOffset(0);
-            const realTomorrowStr = getDateStrOffset(1);
+function toTitle(s) {
+  if (!s) return s;
+  return s.toLocaleLowerCase("tr").replace(/(^|[ \-'])([a-zçğıöşüâî])/gu, (_, p1, p2) => p1 + p2.toLocaleUpperCase("tr"));
+}
 
-            try {
-                // First, get the districts for this state to find the main district
-                const districtsRes = await fetch(`${API_BASE}/locations/districts?stateId=${stateId}`);
-                const districtsData = await districtsRes.json();
-                const districts = districtsData.data || [];
+async function populateIller() {
+  try {
+    const iller = await getIller();
+    states = iller;
+    stateSelect.innerHTML = '<option value="">Şehir seçin...</option>' +
+      iller.map(il => `<option value="${il.SehirID}" data-ad="${il.SehirAdi}">${toTitle(il.SehirAdi)}</option>`).join('');
+    stateSelect.disabled = false;
+  } catch (e) {
+    stateSelect.innerHTML = '<option value="">Yüklenemedi</option>';
+    showError("İl listesi alınamadı: " + (e.message || "Bağlantı hatası"));
+  }
+}
 
-                // Find the district that matches the state name (main district)
-                const stateName = states.find(s => s._id === stateId)?.name || '';
-                let mainDistrict = districts.find(d => d.name === stateName);
+function parseTime(hhmm, baseDate) {
+  const [h, m] = hhmm.split(":").map(Number);
+  return new Date(Date.UTC(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate(), h - 3, m, 0, 0));
+}
 
-                // If no exact match, use the first district
-                if (!mainDistrict && districts.length > 0) {
-                    mainDistrict = districts[0];
-                }
+const TR_MONTHS = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+const TR_DAYS   = ["Pazar","Pazartesi","Salı","Çarşamba","Perşembe","Cuma","Cumartesi"];
+function formatDate(d) { return `${d.getDate()} ${TR_MONTHS[d.getMonth()]} ${d.getFullYear()}, ${TR_DAYS[d.getDay()]}`; }
 
-                if (!mainDistrict) {
-                    throw new Error('İlçe bilgisi bulunamadı.');
-                }
+function getSabahOffset() {
+  const el = document.getElementById("dkInput");
+  const v = el ? parseInt(el.value, 10) : 60;
+  return (!isNaN(v) && v > 0) ? v : 60;
+}
 
-                const districtId = mainDistrict._id;
+function findActivePeriod(timesList) {
+  const p = getIstanbulParts();
+  let todayIdx = -1;
+  for (let i = 0; i < timesList.length; i++) {
+    const d = timesList[i].date;
+    if (d.getFullYear() === p.year && d.getMonth() === p.month - 1 && d.getDate() === p.day) {
+      todayIdx = i; break;
+    }
+  }
+  if (todayIdx < 0) return null;
 
-                // Tek istekle dün + bugün + yarının verisini çek (rate limit'e karşı daha dayanıklı).
-                // "Dün" verisi, gün geçişini gerçek gece yarısı yerine güneş vaktine göre
-                // belirleyebilmek için gerekli.
-                const rangeRes = await fetch(`${API_BASE}/prayer-times/${districtId}/range?startDate=${yesterdayStr}&endDate=${realTomorrowStr}`);
-                if (!rangeRes.ok) throw new Error('API hatası: ' + rangeRes.status);
-                const rangeData = await rangeRes.json();
-                const rangeList = rangeData.data || [];
+  const todayData = timesList[todayIdx];
+  const todayGunes = parseTime(todayData.gunes, todayData.date);
+  const now = new Date();
 
-                const yesterdayPrayer = rangeList.find(d => (d.date || '').startsWith(yesterdayStr));
-                const realTodayPrayer = rangeList.find(d => (d.date || '').startsWith(realTodayStr));
-                const realTomorrowPrayer = rangeList.find(d => (d.date || '').startsWith(realTomorrowStr));
+  if (now < todayGunes && todayIdx > 0) {
+    return { aksamDay: timesList[todayIdx - 1], imsakDay: todayData };
+  }
+  const next = timesList[todayIdx + 1];
+  if (next) return { aksamDay: todayData, imsakDay: next };
+  return { aksamDay: timesList[todayIdx - 1] || todayData, imsakDay: todayData };
+}
 
-                if (!realTodayPrayer) {
-                    throw new Error('Bugünün namaz vakitleri bulunamadı.');
-                }
+function ceilMin(d) { if(!d) return d; const s=d.getUTCSeconds(); return s===0 ? d : new Date(d.getTime()+(60-s)*1000); }
+const TR_TIME_FMT = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Istanbul", hour: "2-digit", minute: "2-digit", hour12: false });
+function fmt(d) {
+  if (!d) return "--:--";
+  const c = ceilMin(d);
+  const parts = TR_TIME_FMT.formatToParts(c);
+  const hh = parts.find(p => p.type === "hour").value;
+  const mm = parts.find(p => p.type === "minute").value;
+  return hh + ":" + mm;
+}
 
-                // Gün geçişini güneş vaktine göre belirle: bugünün güneşi henüz doğmadıysa
-                // (imsak geçmiş olsa bile) "vitrin" hâlâ bir önceki geceye ait olmalı,
-                // yani ekranda dünün akşamından bugünün imsakına kadar olan gece gösterilmeye
-                // devam etmeli. Güneş doğduktan sonra bir sonraki geceye geçilir.
-                const now = new Date();
-                const nowMins = now.getHours() * 60 + now.getMinutes();
-                const todayGunesMins = timeToMinutes(realTodayPrayer.times.gunes);
+function calcDerived(period) {
+  if (!period || !period.aksamDay || !period.imsakDay) return null;
+  const aksam = parseTime(period.aksamDay.aksam, period.aksamDay.date);
+  const imsak = parseTime(period.imsakDay.imsak, period.imsakDay.date);
+  const gunes = parseTime(period.imsakDay.gunes, period.imsakDay.date);
+  const nightMs = imsak - aksam;
+  if (nightMs <= 0) return null;
+  const seher    = new Date(imsak.getTime() - Math.floor(nightMs / 6));
+  const teheccud = new Date(imsak.getTime() - Math.floor(nightMs / 3));
+  const sabahOnce = getSabahOffset();
+  const sabah    = new Date(gunes.getTime() - sabahOnce * 60 * 1000);
+  const cami     = new Date(gunes.getTime() - 30 * 60 * 1000);
+  return { teheccud, seher, sabah, cami, imsak, aksam, gunes };
+}
 
-                let todayPrayer, tomorrowPrayer;
-                if (nowMins < todayGunesMins) {
-                    // Bugünün güneşi henüz doğmadı -> gün henüz "ilerlemedi"
-                    todayPrayer = yesterdayPrayer;
-                    tomorrowPrayer = realTodayPrayer;
-                } else {
-                    // Bugünün güneşi doğdu -> bir sonraki geceye geç
-                    todayPrayer = realTodayPrayer;
-                    tomorrowPrayer = realTomorrowPrayer;
-                }
+async function loadAndRender() {
+  if (!state.location) { setStatus("Lütfen il seçin."); return; }
+  if (state.location.kind === "diyanet" && !state.location.ilceId) {
+    setStatus("Vakit verisi hazırlanıyor…"); return;
+  }
+  if (state.loadInFlight) return;
+  state.loadInFlight = true;
 
-                if (!todayPrayer) {
-                    throw new Error('Dünün namaz vakitleri bulunamadı.');
-                }
-                if (!tomorrowPrayer) {
-                    throw new Error('Yarının namaz vakitleri bulunamadı.');
-                }
+  loadingDiv.classList.remove("hidden");
+  resultsDiv.classList.add("hidden");
+  hideError();
 
-                const todayTimes = todayPrayer.times;
-                const tomorrowTimes = tomorrowPrayer.times;
-                const tomorrowDateStr = (tomorrowPrayer.date || '').slice(0, 10);
+  try {
+    let times;
+    if (state.location.kind === "diyanet") {
+      times = await getVakitlerDiyanet(state.location.ilceId);
+    }
 
-                document.getElementById('gregDate').textContent = formatTrDateStr(tomorrowDateStr);
-                document.getElementById('prayerDate').textContent = 'Yarın, ' + formatTrDateStr(tomorrowDateStr);
+    state.times = times;
+    const period = findActivePeriod(times);
+    if (!period) throw new Error("Bugün için veri bulunamadı.");
 
-                // Fix hijri date - only show full_date which already includes year
-                const hijri = tomorrowPrayer.hijri_date;
-                document.getElementById('hijriDate').textContent = 'Hicrî: ' + hijri.full_date;
+    render(period);
+    setStatus("");
+    startCountdown();
+  } catch (e) {
+    console.error(e);
+    showError("Vakitler alınamadı: " + (e.message || e));
+    loadingDiv.classList.add("hidden");
+  } finally {
+    state.loadInFlight = false;
+  }
+}
 
-                // Prayer times grid - show TOMORROW's times
-                const prayerNames = {
-                    imsak: 'İmsak', gunes: 'Güneş', ogle: 'Öğle',
-                    ikindi: 'İkindi', aksam: 'Akşam', yatsi: 'Yatsı'
-                };
-                document.getElementById('prayerGrid').innerHTML = Object.entries(prayerNames)
-                    .map(([key, name]) => `
-                        <div class="prayer-item">
-                            <div class="p-name">${name}</div>
-                            <div class="p-time">${tomorrowTimes[key]}</div>
-                        </div>
-                    `).join('');
+function render(period) {
+  loadingDiv.classList.add("hidden");
+  const { imsakDay } = period;
 
-                // Calculate night duration: today's AKŞAM to tomorrow's IMSAK
-                let aksamMins = timeToMinutes(todayTimes.aksam);
-                let imsakMins = timeToMinutes(tomorrowTimes.imsak);
+  document.getElementById("gregDate").textContent = formatDate(imsakDay.date);
+  document.getElementById("hijriDate").textContent = imsakDay.hijri ? "Hicrî: " + imsakDay.hijri : "";
+  document.getElementById("prayerDate").textContent = "Yarın, " + formatDate(imsakDay.date);
 
-                // Since tomorrow's imsak is the next day, add 24h
-                imsakMins += 24 * 60;
+  const prayerNames = {
+    imsak: "İmsak", gunes: "Güneş", ogle: "Öğle",
+    ikindi: "İkindi", aksam: "Akşam", yatsi: "Yatsı"
+  };
+  document.getElementById("prayerGrid").innerHTML = Object.entries(prayerNames)
+    .map(([key, name]) => `
+      <div class="prayer-item">
+        <div class="p-name">${name}</div>
+        <div class="p-time">${imsakDay[key] || "--:--"}</div>
+      </div>
+    `).join("");
 
-                const totalNight = imsakMins - aksamMins;
+  const d = calcDerived(period);
+  if (d) {
+    document.getElementById("teheccudTime").textContent = fmt(d.teheccud);
+    const arasiMs = d.teheccud.getTime() + (d.seher.getTime() - d.teheccud.getTime()) / 2;
+    document.getElementById("arasiTime").textContent = fmt(new Date(arasiMs));
+    document.getElementById("seherTime").textContent = fmt(d.seher);
+    document.getElementById("sabahTime").textContent = fmt(d.sabah);
+    document.getElementById("camideTime").textContent = fmt(d.cami);
+  }
 
-                // Teheccüd: last 1/3 of night
-                const teheccudStartRaw = imsakMins - (totalNight / 3);
-                // Round up to next minute
-                const teheccudStart = Math.ceil(teheccudStartRaw);
+  resultsDiv.classList.remove("hidden");
+}
 
-                // Seher: last 1/6 of night
-                const seherStartRaw = imsakMins - (totalNight / 6);
-                // Round up to next minute
-                const seherStart = Math.ceil(seherStartRaw);
+function startCountdown() {
+  if (state.countdownTimer) clearInterval(state.countdownTimer);
+  tickCountdown();
+  state.countdownTimer = setInterval(tickCountdown, 1000);
+}
 
-                // Teheccüd-Seher Arası: midpoint between Teheccüd and Seher
-                const arasiRaw = (teheccudStart + seherStart) / 2;
-                // Round up to next minute
-                const arasiStart = Math.ceil(arasiRaw);
+let lastRenderedImsakDate = null;
+let retryPending = false;
 
-                // Store tomorrow's gunes for sabah namazı calculation
-                tomorrowGunesMins = timeToMinutes(tomorrowTimes.gunes) + 24 * 60;
+function tickCountdown() {
+  if (!state.times) return;
+  const period = findActivePeriod(state.times);
+  if (!period) return;
 
-                // Sabah Namazı: default 60 min before gunes (user can change)
-                const dk = parseInt(dkInput.value) || 60;
-                const sabahMins = tomorrowGunesMins - dk;
+  if (lastRenderedImsakDate !== period.imsakDay.date.getTime()) {
+    lastRenderedImsakDate = period.imsakDay.date.getTime();
+    render(period);
+  }
 
-                // Camide Farz Namazı: 30 minutes before tomorrow's gunes
-                const camideNamazMins = tomorrowGunesMins - 30;
+  const d = calcDerived(period);
+  if (!d) return;
+  const events = [
+    { key: "teheccud", name: "Teheccüd Vakti", time: d.teheccud },
+    { key: "seher",    name: "Seher Vakti",    time: d.seher    },
+    { key: "imsak",    name: "İmsâk",          time: d.imsak    },
+    { key: "sabah",    name: "Sabah Namazı",   time: d.sabah    },
+    { key: "gunes",    name: "Güneş",          time: d.gunes    }
+  ];
+  const now = new Date();
+  const next = events.find(e => e.time > now);
 
-                // Display results
-                document.getElementById('teheccudTime').textContent = minutesToTime(teheccudStart);
-                document.getElementById('arasiTime').textContent = minutesToTime(arasiStart);
-                document.getElementById('seherTime').textContent = minutesToTime(seherStart);
-                document.getElementById('sabahTime').textContent = minutesToTime(sabahMins);
-                document.getElementById('camideTime').textContent = minutesToTime(camideNamazMins);
+  if (!next) {
+    if (!retryPending) {
+      retryPending = true;
+      setTimeout(() => { retryPending = false; loadAndRender(); }, 5000);
+    }
+  }
+}
 
-                loadingDiv.classList.add('hidden');
-                resultsDiv.classList.remove('hidden');
+setInterval(() => {
+  if (!state.times) return;
+  const period = findActivePeriod(state.times);
+  if (!period) loadAndRender();
+}, 60000);
 
-                // Schedule auto-refresh at tomorrow's gunes time
-                scheduleAutoRefresh(tomorrowTimes.gunes);
+async function init() {
+  stateSelect.addEventListener("change", onIlChange);
 
-            } catch(e) {
-                loadingDiv.classList.add('hidden');
-                showError('Namaz vakitleri alınamadı: ' + e.message);
-            }
-        }
+  dkInput.addEventListener("change", () => {
+    if (state.times) {
+      const period = findActivePeriod(state.times);
+      if (period) render(period);
+    }
+  });
+  dkInput.addEventListener("input", () => {
+    if (state.times) {
+      const period = findActivePeriod(state.times);
+      if (period) render(period);
+    }
+  });
 
-        // Auto-load Turkish states on page load
-        loadStates();
+  await populateIller();
 
-        // PWA: Service worker kaydı (Android/Chrome "Yükle" istemi için gerekli)
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js').catch(() => {});
-            });
-        }
-    </script>
+  const saved = loadSaved();
+  if (saved && saved.kind === "diyanet" && saved.ilId && saved.ilceId) {
+    state.location = saved;
+    stateSelect.value = saved.ilId;
+    await loadAndRender();
+  } else {
+    // No saved location, just show the select
+    loadingDiv.classList.add("hidden");
+  }
+}
+
+async function onIlChange(e) {
+  const sel = e.target;
+  const ilId = sel.value;
+  if (!ilId) return;
+  const ilAd = sel.options[sel.selectedIndex].dataset.ad;
+
+  loadingDiv.classList.remove("hidden");
+  resultsDiv.classList.add("hidden");
+  hideError();
+
+  try {
+    const ilce = await getIlAdindakiIlce(ilId, ilAd);
+    if (!ilce) { showError("Bu il için veri bulunamadı."); return; }
+    state.location = { kind: "diyanet", ilId, ilAd, ilceId: ilce.IlceID, ilceAd: ilce.IlceAdi };
+    saveLocation(state.location);
+    await loadAndRender();
+  } catch (err) {
+    showError("Vakit verisi alınamadı: " + (err.message || err));
+    loadingDiv.classList.add("hidden");
+  }
+}
+
+init();
+
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
+}
+</script>
 </body>
 </html>
+
