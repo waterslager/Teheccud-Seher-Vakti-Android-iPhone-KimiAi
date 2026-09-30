@@ -4,7 +4,6 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'index.html'
       - 'kiyamulleyl-android-project.zip'
       - '.github/workflows/build-apk.yml'
 
@@ -30,8 +29,6 @@ jobs:
         run: |
           mkdir -p build_dir
           unzip -q kiyamulleyl-android-project.zip -d build_dir
-          mkdir -p build_dir/app/src/main/assets
-          cp index.html build_dir/app/src/main/assets/index.html
 
       - name: APK derle
         working-directory: build_dir
