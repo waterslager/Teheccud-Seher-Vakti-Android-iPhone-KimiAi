@@ -1451,6 +1451,7 @@ async function init() {
   });
 
   const illerOk = await populateIller();
+  illerLoaded = illerOk; // resumeRefresh liste yüklenemediyse yeniden dener
 
   const saved = loadSaved();
   if (saved && saved.ilId && saved.ilceId) {
@@ -1501,6 +1502,7 @@ async function onIlChange(e) {
     }
     state.location = { ilId, ilAd, ilceId: ilce.IlceID, ilceAd: ilce.IlceAdi };
     saveLocation(state.location);
+    retryCount = 0; // kullanıcı eylemi: taze deneme
     await loadAndRender();
     // #1: Tam merkez ilçe eşleşmesi bulunamadıysa (isExactMatch===false), sessizce
     // yanlış vakit gösterme riskine karşı kullanıcıyı bilgi mesajıyla uyarıyoruz.
@@ -1523,13 +1525,32 @@ async function onIlChange(e) {
 // ekranda yedek (çevrimdışı) veri varsa yeniden çekilir; aksi halde ağ kullanmadan
 // sadece ekran ve geri sayım tazelenir. Kısa sürede art arda tetiklenme engellenir.
 let lastResumeAt = 0;
+// İl listesi açılışta alınamadıysa (seçici "Yüklenemedi" kalmıştı) bağlantı dönünce
+// sayfayı yenilemeden yeniden denenir; kayıtlı şehir varsa seçici ona getirilir.
+let illerLoaded = true;
+async function retryIllerIfNeeded() {
+  if (illerLoaded) return;
+  illerLoaded = true; // eşzamanlı çift çağrıyı önle
+  const ok = await populateIller();
+  illerLoaded = ok;
+  if (!ok) return;
+  if (state.location && state.location.ilId) stateSelect.value = state.location.ilId;
+  updateIlCityDisplay();
+  if (statusDiv.textContent.startsWith("İl listesi alınamadı")) setStatus("");
+}
 function resumeRefresh() {
+  if (!illerLoaded) retryIllerIfNeeded();
   if (!state.location || !state.location.ilceId) return;
   const nowMs = Date.now();
   if (nowMs - lastResumeAt < 2000) return;
   lastResumeAt = nowMs;
   const period = state.times ? findActivePeriod(state.times) : null;
-  if (!period || state.stale) { loadAndRender(); return; }
+  if (!period || state.stale) {
+    // Kullanıcı uygulamaya döndü / bağlantı geldi: taze deneme, eski geri çekilme sayacı sıfırlanır.
+    retryCount = 0;
+    loadAndRender();
+    return;
+  }
   if (render(period)) startCountdown();
 }
 document.addEventListener("visibilitychange", () => {
