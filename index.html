@@ -742,7 +742,9 @@ let state = {
   requestId: 0,
   abortController: null, // #6: devam eden vakit isteğini gerçekten iptal edebilmek için
   timesIlceId: null,     // state.times'ın hangi ilçeye ait olduğu (eski şehir verisini ayırt etmek için)
-  stale: false           // true: ekranda çevrimdışı/kayıtlı veri gösteriliyor
+  timesSource: null,     // state.times'ın hangi kaynağa ait olduğu
+  stale: false,          // true: ekranda çevrimdışı/kayıtlı veri gösteriliyor
+  dataMode: null         // ekrandaki verinin modu (örn. "cache")
 };
 
 // Okunabilirlik/statik analiz için ilgili tüm modül-seviyesi değişkenler
