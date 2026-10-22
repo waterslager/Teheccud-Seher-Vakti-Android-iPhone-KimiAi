@@ -6,7 +6,7 @@
     <title>Kıyâmü'l-Leyl</title>
     <meta name="description" content="Diyanet İşleri Başkanlığı verilerine dayalı Teheccüd, Seher ve Sabah Namazı vakitleri.">
     <meta name="color-scheme" content="dark">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://ezanvakti.imsakiyem.com https://*.imsakiyem.com https://ezanvakti.emushaf.net https://api.aladhan.com; object-src 'none'; base-uri 'none'; form-action 'self';">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' https://ezanvakti.imsakiyem.com https://*.imsakiyem.com https://ezanvakti.emushaf.net https://api.aladhan.com https://diyanet-awqat-salah.ertantan-tr.workers.dev; object-src 'none'; base-uri 'none'; form-action 'self';">
 
     <!-- PWA: Manifest (Android/Chrome "Ana ekrana ekle") -->
     <link rel="manifest" href="manifest.json">
@@ -566,10 +566,12 @@
 
         <div class="il-card src-card">
             <span class="il-label">Veri kaynağı seç</span>
-            <span class="il-city" id="srcDisplay" aria-live="polite">ezanvakti.imsakiyem.com</span>
+            <span class="il-city" id="srcDisplay" aria-live="polite" style="font-size:9.5px">Diyanet Awqat Salah (Proxy - Önbellekli)</span>
             <select id="sourceSelect" aria-label="Veri kaynağı seçimi">
-                <option value="imsakiyem" selected>ezanvakti.imsakiyem.com</option>
-                <option value="emushaf">mushaf (ezanvakti.emushaf.net)</option>
+                <option value="diyanet" selected>Diyanet Awqat Salah (Proxy - Önbellekli)</option>
+                <option value="diyanetlive">Diyanet Awqat Salah (Proxy - Anlık Canlı Veri)</option>
+                <option value="imsakiyem">ezanvakti.imsakiyem.com</option>
+                <option value="emushaf">ezanvakti.emushaf.net</option>
                 <option value="aladhan">api.aladhan.com</option>
             </select>
         </div>
@@ -690,7 +692,7 @@
             </div>
 
             <footer class="source-note">
-                Veri kaynağı: <span id="srcNote" style="color:var(--source-highlight);">Diyanet İşleri Başkanlığı</span> (<strong id="srcDomain" style="color:var(--accent-blue-soft);">ezanvakti.imsakiyem.com</strong>).<br>
+                Veri kaynağı: <span id="srcNote" style="color:var(--source-highlight);">Diyanet İşleri Başkanlığı</span> (<strong id="srcDomain" style="color:var(--accent-blue-soft);">awqatsalah.diyanet.gov.tr</strong>).<br>
                 Her açılışta otomatik güncellenir.
             </footer>
 
@@ -773,50 +775,6 @@ function setLoading(on) {
   document.querySelectorAll("[data-key]").forEach((el) => el.classList.toggle("skeleton", on));
 }
 
-// Son başarılı vakit listesini (yalnızca son şehir) önbelleğe alır; ağ kalıcı
-// olarak kesilirse çevrimdışı yedek olarak gösterilir. Date nesneleri JSON'a
-// timestamp olarak yazılır, okurken geri çevrilir.
-const TIMES_CACHE_KEY = "lastTimes";
-const TIMES_COLS = ["imsak", "gunes", "ogle", "ikindi", "aksam", "yatsi"];
-// TTL'siz okuma: önbellekteki günler tarihe göre geçerlidir (7 günlük genel TTL burada uygulanmaz).
-function cacheGetEntry(key) {
-  try {
-    const raw = localStorage.getItem(CACHE_PREFIX + key);
-    if (!raw) return null;
-    const obj = JSON.parse(raw);
-    return obj && typeof obj.ts === "number" ? obj : null;
-  } catch (e) { console.warn("[storage] okunamadı:", e); return null; }
-}
-function timeEntryValid(t) {
-  return !!t && t.date instanceof Date && !isNaN(t.date.getTime()) &&
-    TIMES_COLS.every((k) => typeof t[k] === "string" && /^\d{2}:\d{2}$/.test(t[k]));
-}
-// Dönen: { times, ts } (ts = son başarılı canlı güncelleme zamanı) veya null.
-function readTimesCache(ilceId) {
-  const e = cacheGetEntry(TIMES_CACHE_KEY);
-  const c = e && e.data;
-  if (!c || c.ilceId !== ilceId || !Array.isArray(c.times) || !c.times.length) return null;
-  const times = c.times.map((t) => ({ ...t, date: new Date(t.date) })).filter(timeEntryValid);
-  return times.length ? { times, ts: e.ts } : null;
-}
-function loadTimesCache(ilceId) {
-  const r = readTimesCache(ilceId);
-  return r ? r.times : null;
-}
-// Aynı ilçenin önbelleği tarih bazında BİRLEŞTİRİLİR: yeni (canlı) gün eskisini ezer,
-// eksik/bozuk günler alınmaz, dünden eski günler atılır. Böylece 30 günlük aralık
-// birkaç kısa istekle de olsa korunur.
-function saveTimesCache(ilceId, newTimes) {
-  const old = readTimesCache(ilceId);
-  const map = new Map();
-  if (old) old.times.forEach((t) => map.set(t.date.getTime(), t));
-  newTimes.forEach((t) => { if (timeEntryValid(t)) map.set(t.date.getTime(), t); });
-  const cutoff = Date.now() - 2 * 86400000;
-  const merged = [...map.values()].filter((t) => t.date.getTime() >= cutoff).sort((a, b) => a.date - b.date);
-  if (!merged.length) return;
-  cacheSet(TIMES_CACHE_KEY, { ilceId, times: merged.map((t) => ({ ...t, date: t.date.getTime() })) });
-}
-
 // Ekranda gösterilen verinin kaynağı: "live" (az önce API'den) | "cache" (kayıtlı) | null.
 const dataBadge = document.getElementById("dataBadge");
 function setDataMode(mode, ts) {
@@ -832,36 +790,6 @@ function setDataMode(mode, ts) {
     : "Kayıtlı veri · " + day + " " + time + " itibarıyla";
   dataBadge.classList.toggle("cache", mode === "cache");
   dataBadge.classList.remove("hidden");
-}
-
-// Arka planda bugünden itibaren 30 günlük vakti önbelleğe ekler (en fazla ~10 dk'da bir dener,
-// önbellek 25+ gün ileriyi kapsıyorsa hiç istek yapmaz). Başarısız olursa sessizce vazgeçer;
-// aralık sınırı varsa 30 → 14 → 7 gün diye küçültür.
-let extendRunning = false;
-let lastExtendTry = 0;
-async function extendTimesCache(ilceId) {
-  if (extendRunning || Date.now() - lastExtendTry < 600000) return;
-  const p = getIstanbulParts();
-  const todayMs = Date.UTC(p.year, p.month - 1, p.day);
-  const cached = readTimesCache(ilceId);
-  const lastMs = cached ? Math.max(...cached.times.map((t) => t.date.getTime())) : 0;
-  if (lastMs - todayMs >= 25 * 86400000) return;
-  extendRunning = true;
-  lastExtendTry = Date.now();
-  try {
-    for (const span of [30, 14, 7]) {
-      try {
-        const ext = await getVakitlerDiyanet(ilceId, undefined, 0, span, 30000);
-        if (!state.location || state.location.ilceId !== ilceId) return; // bu arada şehir değişti
-        saveTimesCache(ilceId, ext);
-        return;
-      } catch (e) {
-        const m = String((e && e.message) || e).match(/API hatası: (\d+)/);
-        const code = m ? Number(m[1]) : 0;
-        if (!(code >= 400 && code < 500 && code !== 408 && code !== 429)) return; // ağ/sunucu sorunu: küçültmek çözmez
-      }
-    }
-  } finally { extendRunning = false; }
 }
 
 function setStatus(msg, isError) {
@@ -886,14 +814,17 @@ function saveLocation(loc) {
 
 const API_BASE = "https://ezanvakti.imsakiyem.com/api";
 const EMUSHAF_BASE = "https://ezanvakti.emushaf.net";
+const DIYANET_PROXY = "https://diyanet-awqat-salah.ertantan-tr.workers.dev"; // Cloudflare Worker (Diyanet Awqat Salah)
 const ALADHAN_BASE = "https://api.aladhan.com/v1";
 const TURKEY_ID = "2";
 
-// Veri kaynağı: "imsakiyem" (varsayılan, her açılışta bununla başlar) | "emushaf" | "aladhan".
-// Yalnızca imsakiyem için son 30 günlük yedek (ön bellek) kullanılır; diğerleri her zaman canlı.
-let source = "imsakiyem";
-const SOURCE_TIMEOUT_MS = 6000; // imsakiyem canlı veri bekleme süresi; sonra yedeğe geçilir
+// Veri kaynağı: "diyanet" (varsayılan, her açılışta bununla başlar) | "diyanetlive" | "imsakiyem" | "emushaf" | "aladhan".
+// Vakitler hiçbir kaynakta telefonda saklanmaz; Diyanet için yedek Worker tarafındadır (KV).
+let source = "diyanet";
+const SOURCE_TIMEOUT_MS = 6000; // imsakiyem il listesi bekleme süresi
 const SOURCE_INFO = {
+  diyanet:     { note: "Diyanet İşleri Başkanlığı", domain: "awqatsalah.diyanet.gov.tr" },
+  diyanetlive: { note: "Diyanet İşleri Başkanlığı", domain: "awqatsalah.diyanet.gov.tr" },
   imsakiyem: { note: "Diyanet İşleri Başkanlığı", domain: "ezanvakti.imsakiyem.com" },
   emushaf:   { note: "Diyanet İşleri Başkanlığı", domain: "ezanvakti.emushaf.net" },
   aladhan:   { note: "AlAdhan · Diyanet yöntemi", domain: "api.aladhan.com" }
@@ -967,7 +898,12 @@ async function fetchJSON(url, { timeoutMs = 15000, signal } = {}) {
   } finally {
     clearTimeout(timer);
   }
-  if (!res.ok) throw new Error("API hatası: " + res.status);
+  if (!res.ok) {
+    // Sunucu (ör. Cloudflare Worker) hata nedenini JSON içinde veriyorsa kullanıcıya gösterilebilsin
+    let detail = "";
+    try { const ej = await res.json(); if (ej && typeof ej.message === "string") detail = ej.message.slice(0, 160); } catch (e) {}
+    throw new Error("API hatası: " + res.status + (detail ? " – " + detail : ""));
+  }
   let json;
   try {
     json = await res.json();
@@ -1145,10 +1081,19 @@ async function getVakitlerAladhan(ilEn, signal) {
   return out;
 }
 
+// Diyanet Awqat Salah (Cloudflare Worker üzerinden). live=true: Worker hafızasını atlar (&nocache=1).
+async function getVakitlerProxy(loc, signal, live) {
+  const url = DIYANET_PROXY + "/?stateId=" + encodeURIComponent(loc.ilId) +
+    "&il=" + encodeURIComponent(loc.ilAd || "") + (live ? "&nocache=1" : "");
+  const data = await fetchJSON(url, { signal, timeoutMs: 25000 });
+  return mapDiyanetDays(data);
+}
+
 function getVakitler(src, loc, signal) {
+  if (src === "diyanet" || src === "diyanetlive") return getVakitlerProxy(loc, signal, src === "diyanetlive");
   if (src === "emushaf") return getVakitlerEmushaf(loc.ilceId, signal);
   if (src === "aladhan") return getVakitlerAladhan(loc.ilEn, signal);
-  return getVakitlerDiyanet(loc.ilceId, signal, -1, 3, SOURCE_TIMEOUT_MS);
+  return getVakitlerDiyanet(loc.ilceId, signal, -1, 3, 15000);
 }
 
 function toTitle(s) {
@@ -1391,10 +1336,6 @@ async function loadAndRender() {
       startCountdown();
       retryCount = 0;
       setDataMode("live", Date.now());
-      if (mySource === "imsakiyem") { // ön bellek yalnızca imsakiyem için
-        saveTimesCache(myLoc.ilceId, times);
-        extendTimesCache(myLoc.ilceId).catch(() => {}); // arka planda 30 güne tamamla
-      }
     }
   } catch (e) {
     if (myRequestId !== state.requestId) return; // eskimiş isteğin hatası, yoksay
@@ -1411,28 +1352,6 @@ async function loadAndRender() {
       highlightCurrentVakit(null);
     }
 
-    // Canlı veri herhangi bir nedenle alınamadıysa (zaman aşımı dahil) imsakiyem için
-    // son 30 günlük yedek HEMEN devreye girer. Yedekte sorun çıkarsa takılmadan hata gösterilir.
-    if (mySource === "imsakiyem") {
-      try {
-        const fallback = loadTimesCache(myLoc.ilceId);
-        const fallbackPeriod = fallback ? findActivePeriod(fallback) : null;
-        if (fallbackPeriod) {
-          state.times = fallback;
-          state.timesIlceId = myLoc.ilceId;
-          state.timesSource = mySource;
-          state.stale = true; // bağlantı dönünce / uygulama öne gelince yenilenir
-          if (render(fallbackPeriod)) {
-            startCountdown();
-            const fbEntry = readTimesCache(myLoc.ilceId);
-            setDataMode("cache", fbEntry ? fbEntry.ts : Date.now());
-            setStatus("Çevrimdışı: kayıtlı vakitler gösteriliyor. Bağlantı gelince yenilenir. (" + msg.slice(0, 70) + ")", false);
-            return;
-          }
-        }
-      } catch (ce) { console.warn("[cache] yedek kullanılamadı:", ce); }
-    }
-
     // Yeni şehir/kaynak yüklenemediyse eski verisi state'te kalmasın.
     if (state.timesIlceId !== myLoc.ilceId || state.timesSource !== mySource) {
       state.times = null; state.timesIlceId = null; state.timesSource = null;
@@ -1443,7 +1362,8 @@ async function loadAndRender() {
       setStatus(
         "Vakitler alınamadı. İnternet bağlantınızı kontrol edin; " +
         "bazı işyeri/kurumsal ağlar bu veri kaynağına erişimi engelleyebilir. " +
-        "Yukarıdan farklı bir veri kaynağı seçebilirsiniz.",
+        "Yukarıdan farklı bir veri kaynağı seçebilirsiniz." +
+        (msg.includes(" – ") ? " (" + msg.split(" – ")[1] + ")" : ""),
         true
       );
     } else {
@@ -1723,14 +1643,17 @@ async function init() {
 
   sourceSelect.addEventListener("change", () => activateSource(sourceSelect.value));
   const s0 = readSession(SESSION_SRC_KEY);
-  await activateSource(SOURCE_INFO[s0] ? s0 : "imsakiyem", true);
+  // Telefondaki vakit yedekleri (eski imsakiyem 30 günlük bellek dahil) kaldırıldı; yer kaplamasın diye silinir.
+  try { localStorage.removeItem(CACHE_PREFIX + "lastTimes"); localStorage.removeItem(CACHE_PREFIX + "lastTimesDiyanet"); } catch (e) {}
+  await activateSource(SOURCE_INFO[s0] ? s0 : "diyanet", true);
 }
 
 function updateSourceUI() {
-  const info = SOURCE_INFO[source] || SOURCE_INFO.imsakiyem;
+  const info = SOURCE_INFO[source] || SOURCE_INFO.diyanet;
   sourceSelect.value = source;
   const opt = sourceSelect.options[sourceSelect.selectedIndex];
   srcDisplay.textContent = opt ? opt.textContent : info.domain;
+  srcDisplay.style.fontSize = srcDisplay.textContent.length > 36 ? "9.5px" : ""; // uzun kaynak adı sığsın
   const note = document.getElementById("srcNote");
   const dom = document.getElementById("srcDomain");
   if (note) note.textContent = info.note;
@@ -1742,20 +1665,23 @@ function updateSourceUI() {
 let sourceToken = 0;
 // Son seçilen/gösterilen il adı: bir kaynakta veri gelmese bile kaynaklar arası geçişte il
 // yeniden sorulmaz. Kaynak ve il, sayfa yenilemede (çekip yenile) korunur; uygulama
-// tamamen kapatılıp açılınca (yeni oturum) imsakiyem ile ve kayıtlı il ile başlanır.
+// tamamen kapatılıp açılınca (yeni oturum) Diyanet (Önbellekli) ile ve kayıtlı il ile başlanır.
 const SESSION_SRC_KEY = "kiyamul-leyl.session.source";
 const SESSION_IL_KEY = "kiyamul-leyl.session.il";
+const IL_PREF_KEY = "kiyamul-leyl.ilpref.v1"; // son seçilen il (tüm kaynaklar için ortak)
 let lastIlAd = null;
 function rememberIl(ilAd) {
   if (!ilAd) return;
   lastIlAd = ilAd;
   try { sessionStorage.setItem(SESSION_IL_KEY, ilAd); } catch (e) {}
+  try { localStorage.setItem(IL_PREF_KEY, ilAd); } catch (e) {}
 }
 function readSession(key) { try { return sessionStorage.getItem(key); } catch (e) { return null; } }
 async function activateSource(newSrc, initial) {
   const myToken = ++sourceToken;
   if (initial && !lastIlAd) lastIlAd = readSession(SESSION_IL_KEY);
-  if (initial && !lastIlAd) { const sv = loadSaved(); if (sv && sv.ilAd) lastIlAd = sv.ilAd; }
+  if (initial && !lastIlAd) { try { lastIlAd = localStorage.getItem(IL_PREF_KEY); } catch (e) {} }
+  if (initial && !lastIlAd) { const sv = loadSaved(); if (sv && sv.ilAd) lastIlAd = sv.ilAd; } // eski imsakiyem kaydı
   const prevIlAd = (state.location && state.location.ilAd) || lastIlAd;
   try { sessionStorage.setItem(SESSION_SRC_KEY, newSrc); } catch (e) {}
   source = newSrc;
@@ -1847,7 +1773,7 @@ async function selectIl(ilId, ilAd) {
   try {
     let loc;
     let exact = true;
-    if (mySource === "aladhan") {
+    if (mySource === "aladhan" || mySource === "diyanet" || mySource === "diyanetlive") {
       // aladhan: yalnızca il bazlı, ilçe yok.
       const il = STATIC_ILLER.find((x) => x.id === String(ilId));
       loc = { ilId: String(ilId), ilAd, ilceId: String(ilId), ilceAd: "", ilEn: il ? il.en : trToEn(ilAd) };
