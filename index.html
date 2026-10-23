@@ -694,6 +694,7 @@
             <footer class="source-note">
                 Veri kaynağı: <span id="srcNote" style="color:var(--source-highlight);">Diyanet İşleri Başkanlığı</span> (<strong id="srcDomain" style="color:var(--accent-blue-soft);">awqatsalah.diyanet.gov.tr</strong>).<br>
                 Her açılışta otomatik güncellenir.
+                <div id="srcLoc" class="hidden" style="margin-top:3px;font-size:0.62rem;opacity:.85;"></div>
             </footer>
 
             <div id="dataBadge" class="data-badge hidden" role="status" aria-live="polite"></div>
@@ -1083,14 +1084,14 @@ async function getVakitlerAladhan(ilEn, signal) {
 }
 
 // Diyanet Awqat Salah (Cloudflare Worker üzerinden). live=true: Worker hafızasını atlar (&nocache=1).
-let proxyMeta = null; // son Worker yanıtının X-Source / X-Cached-At bilgisi (rozet doğru yazsın diye)
+let proxyMeta = null; // son Worker yanıtının X-Source / X-Cached-At / X-City bilgisi (rozet ve konum satırı için)
 async function getVakitlerProxy(loc, signal, live) {
   const url = DIYANET_PROXY + "/?stateId=" + encodeURIComponent(loc.ilId) +
     "&il=" + encodeURIComponent(loc.ilAd || "") + (live ? "&nocache=1" : "");
   proxyMeta = null;
   const data = await fetchJSON(url, {
     signal, timeoutMs: 25000,
-    onHeaders: (h) => { proxyMeta = { src: h.get("X-Source") || "", at: Number(h.get("X-Cached-At")) || 0 }; }
+    onHeaders: (h) => { proxyMeta = { src: h.get("X-Source") || "", at: Number(h.get("X-Cached-At")) || 0, city: h.get("X-City") || "" }; }
   });
   return mapDiyanetDays(data);
 }
@@ -1353,6 +1354,7 @@ async function loadAndRender() {
       } else {
         setDataMode("live", pm && pm.at ? pm.at : Date.now());
       }
+      updateLocationLine();
     }
   } catch (e) {
     if (myRequestId !== state.requestId) return; // eskimiş isteğin hatası, yoksay
@@ -1402,6 +1404,7 @@ function clearDisplay() {
   lastGridDateKey = null;
   cachedNextEvent = null;
   setDataMode(null);
+  updateLocationLine();
 }
 
 function render(period) {
@@ -1663,6 +1666,31 @@ async function init() {
   // Telefondaki vakit yedekleri (eski imsakiyem 30 günlük bellek dahil) kaldırıldı; yer kaplamasın diye silinir.
   try { localStorage.removeItem(CACHE_PREFIX + "lastTimes"); localStorage.removeItem(CACHE_PREFIX + "lastTimesDiyanet"); } catch (e) {}
   await activateSource(SOURCE_INFO[s0] ? s0 : "diyanet", true);
+}
+
+// Footer'daki "Konum" satırı: yalnızca Diyanet (Önbellekli / Anlık Canlı) ve imsakiyem için gösterilir.
+// Diyanet: Worker'ın seçtiği ilçe (X-City, ör. "9541 ISTANBUL (exact)"); imsakiyem: seçilen ilçe.
+function updateLocationLine() {
+  const el = document.getElementById("srcLoc");
+  if (!el) return;
+  let text = "";
+  const loc = state.location;
+  if (loc && state.times && state.timesSource === source) {
+    const il = toTitle(loc.ilAd || "");
+    if (source === "diyanet" || source === "diyanetlive") {
+      const m = proxyMeta && proxyMeta.city ? /^(\d+)\s+(.+?)\s+\((\w+)\)$/.exec(proxyMeta.city) : null;
+      if (m) {
+        const id = m[1], name = m[2], kind = m[3];
+        text = (kind === "exact" || kind === "merkez")
+          ? il + " (Merkez · " + id + ")"
+          : il + " (" + toTitle(name) + " · " + id + ") – merkez ilçe bulunamadı";
+      }
+    } else if (source === "imsakiyem" && loc.ilceAd) {
+      text = il + (sameIl(loc.ilceAd, loc.ilAd) ? " (Merkez)" : " (" + toTitle(loc.ilceAd) + ")");
+    }
+  }
+  el.textContent = text ? "Konum: " + text : "";
+  el.classList.toggle("hidden", !text);
 }
 
 function updateSourceUI() {
