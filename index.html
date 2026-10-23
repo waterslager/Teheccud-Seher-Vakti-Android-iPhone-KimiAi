@@ -874,7 +874,7 @@ function makeUserAbortError() {
 }
 function isUserAbort(e) { return !!e && e.name === USER_ABORT_NAME; }
 
-async function fetchJSON(url, { timeoutMs = 15000, signal } = {}) {
+async function fetchJSON(url, { timeoutMs = 15000, signal, onHeaders } = {}) {
   const timeoutController = new AbortController();
   const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
   const combinedSignal = combineSignals(timeoutController.signal, signal);
@@ -904,6 +904,7 @@ async function fetchJSON(url, { timeoutMs = 15000, signal } = {}) {
     try { const ej = await res.json(); if (ej && typeof ej.message === "string") detail = ej.message.slice(0, 160); } catch (e) {}
     throw new Error("API hatası: " + res.status + (detail ? " – " + detail : ""));
   }
+  if (onHeaders) { try { onHeaders(res.headers); } catch (e) {} }
   let json;
   try {
     json = await res.json();
@@ -1082,10 +1083,15 @@ async function getVakitlerAladhan(ilEn, signal) {
 }
 
 // Diyanet Awqat Salah (Cloudflare Worker üzerinden). live=true: Worker hafızasını atlar (&nocache=1).
+let proxyMeta = null; // son Worker yanıtının X-Source / X-Cached-At bilgisi (rozet doğru yazsın diye)
 async function getVakitlerProxy(loc, signal, live) {
   const url = DIYANET_PROXY + "/?stateId=" + encodeURIComponent(loc.ilId) +
     "&il=" + encodeURIComponent(loc.ilAd || "") + (live ? "&nocache=1" : "");
-  const data = await fetchJSON(url, { signal, timeoutMs: 25000 });
+  proxyMeta = null;
+  const data = await fetchJSON(url, {
+    signal, timeoutMs: 25000,
+    onHeaders: (h) => { proxyMeta = { src: h.get("X-Source") || "", at: Number(h.get("X-Cached-At")) || 0 }; }
+  });
   return mapDiyanetDays(data);
 }
 
@@ -1335,7 +1341,18 @@ async function loadAndRender() {
       setStatus("");
       startCountdown();
       retryCount = 0;
-      setDataMode("live", Date.now());
+      // Diyanet (Worker) yanıtı Worker'ın kendi belleğinden geldiyse rozet bunu dürüstçe gösterir.
+      const pm = (mySource === "diyanet" || mySource === "diyanetlive") ? proxyMeta : null;
+      if (pm && pm.src && pm.src !== "live" && pm.at) {
+        setDataMode("cache", pm.at);
+        if (pm.src === "stale" || pm.src === "limit") {
+          setStatus(pm.src === "limit"
+            ? "Günlük canlı veri sınırına ulaşıldı: Worker'daki son kayıt gösteriliyor."
+            : "Diyanet'ten taze veri alınamadı: Worker'daki son kayıt gösteriliyor.", false);
+        }
+      } else {
+        setDataMode("live", pm && pm.at ? pm.at : Date.now());
+      }
     }
   } catch (e) {
     if (myRequestId !== state.requestId) return; // eskimiş isteğin hatası, yoksay
