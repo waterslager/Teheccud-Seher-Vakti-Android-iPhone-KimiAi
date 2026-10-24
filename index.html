@@ -693,7 +693,7 @@
 
             <footer class="source-note">
                 Veri kaynağı: <span id="srcNote" style="color:var(--source-highlight);">Diyanet İşleri Başkanlığı</span> (<strong id="srcDomain" style="color:var(--accent-blue-soft);">awqatsalah.diyanet.gov.tr</strong>).<br>
-                Her açılışta otomatik güncellenir.
+                <span id="srcFreq">Açılışta Worker'daki son kayıt gösterilir; aşağı çekince Diyanet'ten yenilenir.</span>
                 <div id="srcLoc" class="hidden" style="margin-top:3px;font-size:0.62rem;opacity:.85;"></div>
             </footer>
 
@@ -824,11 +824,11 @@ const TURKEY_ID = "2";
 let source = "diyanet";
 const SOURCE_TIMEOUT_MS = 6000; // imsakiyem il listesi bekleme süresi
 const SOURCE_INFO = {
-  diyanet:     { note: "Diyanet İşleri Başkanlığı", domain: "awqatsalah.diyanet.gov.tr" },
-  diyanetlive: { note: "Diyanet İşleri Başkanlığı", domain: "awqatsalah.diyanet.gov.tr" },
-  imsakiyem: { note: "Diyanet İşleri Başkanlığı", domain: "ezanvakti.imsakiyem.com" },
-  emushaf:   { note: "Diyanet İşleri Başkanlığı", domain: "ezanvakti.emushaf.net" },
-  aladhan:   { note: "AlAdhan · Diyanet yöntemi", domain: "api.aladhan.com" }
+  diyanet:     { note: "Diyanet İşleri Başkanlığı", domain: "awqatsalah.diyanet.gov.tr", freq: "Açılışta Worker'daki son kayıt gösterilir; aşağı çekince Diyanet'ten yenilenir." },
+  diyanetlive: { note: "Diyanet İşleri Başkanlığı", domain: "awqatsalah.diyanet.gov.tr", freq: "Her açılışta ve yenilemede Diyanet'ten anlık alınır." },
+  imsakiyem: { note: "Diyanet İşleri Başkanlığı", domain: "ezanvakti.imsakiyem.com", freq: "Her açılışta otomatik güncellenir." },
+  emushaf:   { note: "Diyanet İşleri Başkanlığı", domain: "ezanvakti.emushaf.net", freq: "Her açılışta otomatik güncellenir." },
+  aladhan:   { note: "AlAdhan · Diyanet yöntemi", domain: "api.aladhan.com", freq: "Her açılışta otomatik güncellenir." }
 };
 
 // 81 il (Diyanet il kimlikleri 500–580, alfabetik). mushaf ve aladhan kaynaklarında il listesi buradan gelir.
@@ -1713,6 +1713,8 @@ function updateSourceUI() {
   const dom = document.getElementById("srcDomain");
   if (note) note.textContent = info.note;
   if (dom) dom.textContent = info.domain;
+  const fr = document.getElementById("srcFreq");
+  if (fr) fr.textContent = info.freq || "Her açılışta otomatik güncellenir.";
 }
 
 // Kaynak değiştirir (açılışta imsakiyem). Mevcut il, adına göre yeni kaynakta otomatik seçilir.
