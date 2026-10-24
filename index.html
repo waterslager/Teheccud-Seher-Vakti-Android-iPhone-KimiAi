@@ -1091,7 +1091,7 @@ async function getVakitlerProxy(loc, signal, live) {
   proxyMeta = null;
   const data = await fetchJSON(url, {
     signal, timeoutMs: 25000,
-    onHeaders: (h) => { proxyMeta = { src: h.get("X-Source") || "", at: Number(h.get("X-Cached-At")) || 0, city: h.get("X-City") || "" }; }
+    onHeaders: (h) => { proxyMeta = { src: h.get("X-Source") || "", at: Number(h.get("X-Cached-At")) || 0, city: h.get("X-City") || "", err: (() => { try { return decodeURIComponent(h.get("X-Error") || ""); } catch (e) { return ""; } })() }; }
   });
   return mapDiyanetDays(data);
 }
@@ -1348,9 +1348,11 @@ async function loadAndRender(forceLive) {
       if (pm && pm.src && pm.src !== "live" && pm.at) {
         setDataMode("cache", pm.at);
         if (pm.src === "stale" || pm.src === "limit") {
-          setStatus(pm.src === "limit"
+          // Silinmeden kalır (kırmızı): neden taze veri gelmediği görülsün
+          setStatus((pm.src === "limit"
             ? "Günlük canlı veri sınırına ulaşıldı: Worker'daki son kayıt gösteriliyor."
-            : "Diyanet'ten taze veri alınamadı: Worker'daki son kayıt gösteriliyor.", false);
+            : "Diyanet'ten taze veri alınamadı: Worker'daki son kayıt gösteriliyor.") +
+            (pm.err ? " (" + pm.err + ")" : ""), true);
         }
       } else {
         setDataMode("live", pm && pm.at ? pm.at : Date.now());
