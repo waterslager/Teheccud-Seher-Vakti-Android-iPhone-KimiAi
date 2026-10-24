@@ -1084,6 +1084,11 @@ async function getVakitlerAladhan(ilEn, signal) {
 }
 
 // Diyanet Awqat Salah (Cloudflare Worker üzerinden). live=true: Worker hafızasını atlar (&nocache=1).
+// Sayfa "yenile" ile açıldıysa (APK'nın ya da tarayıcının kendi çekip yenilemesi dahil) ilk yükleme
+// Diyanet kaynaklarında Worker hafızasını atlayıp taze veri ister. Normal açılış (uygulamayı yeniden açma) etkilenmez.
+let forceLiveNext = false;
+try { const nav = performance.getEntriesByType("navigation")[0]; forceLiveNext = !!(nav && nav.type === "reload"); } catch (e) {}
+
 let proxyMeta = null; // son Worker yanıtının X-Source / X-Cached-At / X-City bilgisi (rozet ve konum satırı için)
 async function getVakitlerProxy(loc, signal, live) {
   const url = DIYANET_PROXY + "/?stateId=" + encodeURIComponent(loc.ilId) +
@@ -1315,6 +1320,8 @@ async function loadAndRender(forceLive) {
   const myRequestId = ++state.requestId;
   const mySource = source;
   const myLoc = state.location;
+  const live = !!forceLive || forceLiveNext; // sayfa yenilendiyse ilk yükleme taze
+  forceLiveNext = false;
 
   // Önceki istek hâlâ sürüyorsa gerçekten iptal edilir.
   if (state.abortController) state.abortController.abort();
@@ -1327,7 +1334,7 @@ async function loadAndRender(forceLive) {
   setStatus(haveShown ? "Güncel vakitler alınıyor…" : "Vakitler çekiliyor…");
 
   try {
-    const times = await getVakitler(mySource, myLoc, myAbortController.signal, forceLive);
+    const times = await getVakitler(mySource, myLoc, myAbortController.signal, live);
 
     if (myRequestId !== state.requestId) return; // bu sırada daha yeni bir istek başladı, bu sonucu yoksay
 
